@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <title></title>
+    <script src="hanbao.js"></script>
+    <script>
+        var test_grammar = {
+            name: "test",
+
+            lexer: {
+                ID: /\w+/,
+                NUMBER:/\d+/
+            },
+            parser: {
+                refObj: [
+                    ["ID", "id"],
+                    ["NUMBER","number"]
+                ],
+                expr: [
+                    ["expr '^' expr","exp"],
+                    ["expr '*' expr","time"],
+                    ["expr '+' expr","plus"],
+                    //["refObj", "ref"],
+                    ["ID",'id']
+                ]
+            },
+            config: {
+                skip: [
+                    //white space
+                    /\s/,
+                    //comments
+                    /[/][/][^\n](\n)?/
+                ],
+                mode:"token"
+            }
+        }
+
+        var g = grammar()
+        g.register(test_grammar)
+        var g_merged = g.getMergedGrammar("test")
+        var raw_p = raw_parser(g_merged)
+        // raw ast
+        //var raw_ast = raw_p.parse("1 * 2 +3", "expr")
+        // tokens
+        var tokens = raw_p.tokens("1 * 2 +3", "expr")
+        console.log(tokens)
+
+        
+
+
+    </script>
+</head>
+<body>
+    <ul>Type:
+        <li>option: 0</li>
+        <li>composite: 1</li>
+        <li>branch: 2</li>
+        <li>token: 3</li>
+    </ul>
+
+    <ul>
+        Sub Type:
+        <li>named: 0</li>
+        <li>anonymous: 1</li>
+    </ul>
+</body>
+</html>
