@@ -18,11 +18,11 @@
                     ["NUMBER","number"]
                 ],
                 expr: [
-                    ["expr '^' expr","exp"],
-                    ["expr '*' expr","time"],
-                    ["expr '+' expr","plus"],
                     //["refObj", "ref"],
-                    ["ID",'id']
+                    ["expr:=left '*' expr:=right", "time"],
+                    ["expr:=left '+' expr:=right", 'plus'],
+                    ["'{' (ID:=key ':' expr:=value):=list[] (',' ID:=key ':' expr:=value)*:=list[] '}'", "obj"],
+                    "ID"
                 ]
             },
             config: {
@@ -32,7 +32,7 @@
                     //comments
                     /[/][/][^\n](\n)?/
                 ],
-                mode:"token"
+                mode:"text"
             }
         }
 
@@ -43,9 +43,14 @@
         // raw ast
         //var raw_ast = raw_p.parse("1 * 2 +3", "expr")
         // tokens
-        var tokens = raw_p.tokens("1 * 2 +3", "expr")
-        console.log(tokens)
+        var ast = raw_p.parse("{a:1,b:2}", "expr")
 
+        var rewriter = basic_ast_rewritor(g_merged.parser.expr)
+        var re_write_ast = rewriter.rewrite(ast)
+        
+
+        console.log(ast)
+        console.log(re_write_ast)
         
 
 
