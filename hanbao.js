@@ -360,13 +360,25 @@ var grammar = function () {
             return parse_branch(option_name, name, text)
         })
 
+        var branch_map = branches_config.reduce(function (pre, cur) {
+            pre[cur.name] = cur
+            return pre
+        }, {})
+        var left_self_rec_branches = branches_config.filter(function (b) {
+            return b.isLeftSelfRec
+        })
+
         return {
             name: option_name,
             type:grammarType.option,
             branches: branches_config,
             isLeftSelfRec: branches_config.some(function (b) {
                 return b.isLeftSelfRec
-            })
+            }),
+            get_branch: function (name) {
+                return branch_map[name]
+            },
+            leftSelfRecBranches: left_self_rec_branches
         }
     }
 
@@ -412,7 +424,19 @@ var grammar = function () {
         //parse ast config
         if (scan.peek(":")) {
             scan.move()
-            unit.ast = parse_ast(scan)
+            if (scan.peek("=")) {
+                scan.move()
+                if (scan.peek("_")) {
+                    scan.move()
+                    unit.ast = "replace"
+                }
+                else {
+                    unit.ast = parse_ast(scan)
+                }
+            }
+            else {
+                unit.ast = "skip"
+            }
         }
 
         //populate default ast
@@ -563,7 +587,30 @@ var grammar = function () {
         }
     }
 
-   
+    //TODO: maybe not suitable to put here, move to a new place
+    var update_ast_config = function (parsers) {
+        for (var name in parsers) {
+            parsers[name].branches.forEach(function (b) {
+                update_unit_ast_config(b.config)
+            })
+        }
+    }
+
+    var update_unit_ast_config = function (unit) {
+        if (unit.type === grammarType.composite) {
+            unit.config.forEach(function (sub_unit) {
+                update_unit_ast_config(sub_unit)
+            })
+        }
+        else if (unit.ast === undefined) {
+            if (unit.type === grammarType.token && unit.subType === subType.named || unit.type === grammarType.option) {
+                unit.ast = {
+                    path: unit.config.name,
+                    isArray: false
+                }
+            }
+        }
+    }
     
 
 
@@ -603,14 +650,17 @@ var grammar = function () {
 
             copy_grammar(g,mergedRepo)
 
-            //set default value
+            //set default config value
             if (mergedRepo.config.mode === undefined) {
                 mergedRepo.config.mode = "text"
             }
 
+
             //update all reference config
             update_reference(mergedRepo)
 
+            //update all ast config(set undefined as default: named token and option will set {path = *.name, isArray = false})
+            update_ast_config(mergedRepo.parser)
             return mergedRepo
         }
     }
@@ -1104,8 +1154,13 @@ var raw_parser = function (grammar_merged) {
 
 var helper = {
     add_to_ast: function (new_ast, part, astConfig) {
-        var taget
-        if (astConfig.isArray) {
+        var target
+        if (astConfig === undefined || astConfig == "skip") {
+        }
+        else if (astConfig === "replace") {
+            new_ast = part
+        }
+        else if (astConfig.isArray) {
             var target = new_ast[astConfig.path]
             if (target === undefined) {
                 target = new_ast[astConfig.path] = []
@@ -1126,19 +1181,182 @@ var helper = {
                 new_ast[astConfig.path].push(part)
             }
         }
-       
+       return new_ast
     }
 }
 
 var basic_ast_rewritor = function (option) {
+    //depends on differnt mode, we need to use getValue function to get the real ast elements
+    //text mode
+    var getValue = function (raw_ast) {
+        
+        return raw_ast
+    }
+
+
+    var advance_get_branch_ast = function (get_high_level_branch_ast_prev, branch) {
+        return function (raw_ast) {
+            return get_branch_ast(get_high_level_branch_ast_prev, raw_ast,branch)
+        }
+    }
+
+    var get_branch_ast = function (get_high_level_branch_ast,raw_ast, branch) {
+        var raw_ast = getValue(raw_ast)
+        var option_name = branch.option
+        var first_unit = branch.config.config[0]
+        var rest_unit = branch.config.config.slice(1)
+
+
+        var branch_ast
+
+        //reduce situation
+        if (raw_ast.value[1].length == 0) {
+            branch_ast = get_high_level_branch_ast(raw_ast.value[0])
+        }
+
+        var first_ast = get_high_level_branch_ast(raw_ast.value[0])
+        var ast = {}
+
+        raw_ast.value[1].forEach(function (rest_asts) {            
+            //TODO: think the logic here
+           
+             ast = helper.add_to_ast(ast, first_ast, first_unit.ast)
+            
+            
+
+            rest_asts.forEach(function (rest_raw_ast,i) {
+                //left self recursive
+                
+                if (rest_unit[i].type == grammarType.option && rest_unit[i].config.name === option_name) {
+                    var part_ast = get_high_level_branch_ast(rest_raw_ast)
+                    ast = helper.add_to_ast(ast, part_ast, rest_unit[i].ast)
+                }
+                else {
+                    rewrite_unit(rest_asts[i],ast,rest_unit[i])
+                }
+            })
+            ast.__option = option_name
+            ast.__branch = branch.name
+
+            first_ast = ast
+
+            ast = {}
+        })
+
+
+
+        return first_ast
+    }
+
+    
 
     var rewrite_toekn = function (raw_ast,new_ast,token) {
+        new_ast = helper.add_to_ast(new_ast, getValue(raw_ast), token.ast)
+        return new_ast
+    }
+
+    var rewrite_composite = function (raw_ast, new_ast, composite) {
+        var sub_units = composite.config
+        if(composite.ast === undefined){
+            sub_units.forEach(function (sub_unit,i) {
+                new_ast = rewrite_unit(getValue(raw_ast)[i],new_ast, sub_unit)
+            })
+        }
+        else if (composite.ast === "skip") {
+
+        }
+        else if (composite.ast === "replace") {
+            var replace_ast = {}
+            sub_units.forEach(function (sub_unit, i) {
+                replace_ast = rewrite_unit(getValue(raw_ast)[i],replace_ast, sub_unit)
+            })
+
+            new_ast = replace_ast
+        }//normal case
+        else {
+            var sub_ast = {}
+            sub_units.forEach(function (sub_unit, i) {
+                sub_ast = rewrite_unit(getValue(raw_ast)[i], sub_ast, sub_unit)
+            })
+
+            new_ast =  helper.add_to_ast(new_ast,sub_ast,composite.ast)
+        }
+        return new_ast
+    }
+
+    var rewrite_option = function (raw_ast,new_ast,option) {
+        if (option.ast === "skip") {
+            
+        }
+        else if(option.ast === 'repalce') {
+            new_ast = get_option_ast(getValue(raw_ast), option.config)
+        }
+        else {
+            new_ast = helper.add_to_ast(new_ast, get_option_ast(getValue(raw_ast),option.config),option.ast)
+        }
+
+        return new_ast
+    }
+
+    var get_option_ast = function (raw_ast,option) {
+        var branch = option.get_branch(raw_ast.branch)
+        var new_ast
+
+        var get_non_left_self_rec_ast = function (raw_ast) {
+            var raw_ast = getValue(raw_ast)
+            var new_ast = {}
+            var branch = option.get_branch(raw_ast.branch)
+            new_ast = rewrite_composite(raw_ast.value,new_ast,branch.config)
+            return {
+                __branch: branch.name,
+                __option:option.name,
+                value: new_ast
+            }
+        }
+
+        if (branch.isLeftSelfRec) {
+            var get_left_self_rec_ast = option.leftSelfRecBranches.reduce(function (pre,cur) {
+                return advance_get_branch_ast(pre,cur)
+            }, get_non_left_self_rec_ast)
+            new_ast = get_left_self_rec_ast(raw_ast)
+        }
+        else {
+            new_ast = get_non_left_self_rec_ast(raw_ast)
+        }
+
+        return new_ast
+    }
+
+    var rewrite_unit = function (raw_ast, new_ast, unit) {
         
+        //warning: chekcing if it's correct
+        if (unit.quantifier !== undefined) {
+            getValue(raw_ast).forEach(function (sub_raw_ast) {
+                new_ast = rewrite_unit_noquantifier(sub_raw_ast, new_ast, unit)
+            })
+
+            return new_ast
+        }
+        else {
+            return rewrite_unit_noquantifier(raw_ast, new_ast, unit)
+        }
+    }
+
+    var rewrite_unit_noquantifier = function (raw_ast, new_ast, unit) {
+        if (unit.type === grammarType.token) {
+            return rewrite_toekn(raw_ast, new_ast, unit)
+        }
+        else if (unit.type === grammarType.composite) {
+            return rewrite_composite(raw_ast, new_ast, unit)
+        }
+        else if (unit.type === grammarType.option) {
+            return rewrite_option(raw_ast, new_ast, unit)
+        }
     }
 
     return {
         rewrite: function (raw_ast) {
-
+            return get_option_ast(raw_ast,option)
         }
     }
 }
