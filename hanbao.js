@@ -26,9 +26,9 @@ var scanner = function (text, config) {
     if (config.mode === 'token') {
         Token = function (text, start, end) {
             return {
-                text: text,
-                start: start !== undefined ? start : _currentIndex - text.length,
-                end: end !== undefined ? end : _currentIndex
+                __text: text,
+                __start: start !== undefined ? start : _currentIndex - text.length,
+                __end: end !== undefined ? end : _currentIndex
             }
         }
     }
@@ -140,7 +140,7 @@ var scanner = function (text, config) {
         var skipped = skip()
         _lastskipped = skipped
 
-        _lastToken.skipped = skipped
+        _lastToken['__skip'] = skipped
         
         _currentTokens.push(_lastToken)
             
@@ -682,7 +682,6 @@ var raw_parser = function (grammar_merged) {
 
                 var isFirst = true
                 var _matcher
-                var startIndex = -1
 
                 
 
@@ -691,7 +690,7 @@ var raw_parser = function (grammar_merged) {
                     next: function () {
 
                         if (isFirst) {
-                            startIndex = scanner.currentIndex
+                           
                             _matcher = creator.composite([higher_matcher_factory(), creator.quantifier(
                                 function () {
                                     return creator.composite(rest.map(function (sub_unit) {
@@ -711,25 +710,17 @@ var raw_parser = function (grammar_merged) {
                             var result = {
                                 branch: branch.name,
                                 option: branch.option,
-                                value: match
+                                value: match,
+                                __type:grammarType.option
                             }
 
-                            if (mode == 'text') {
-
-                            }
-                            else if (mode == 'token') {
-
-                                result.start = startIndex
-                                result.end = scanner.currentIndex
-                                result.text = scanner.text(startIndex)
-                            }
+                            
 
                             return result
                         }
                     },
                     reset: function () {
                         isFirst = true
-                        startIndex = -1
                         _matcher.reset()
                     }
 
@@ -802,13 +793,9 @@ var raw_parser = function (grammar_merged) {
 
                         if (_currentIndex == _uBound) {
                             //success
-                            if (mode === 'text') {
-                                composite_match = result
-                            }
-                            else {
-                                composite_match = scanner.fetch()
-                                composite_match.value = result
-                            }
+                            
+                            composite_match = result
+                            
                             isSuccess = true
                             _currentIndex--
                             
@@ -846,12 +833,10 @@ var raw_parser = function (grammar_merged) {
                 var _currentIndex = 0
                 var _matchers = []
                 var result = []
-                var startIndex = -1
 
                 var firstTime = function () {
                     if (isFirst) {
                         _matchers.push(matcherFacotory())
-                        startIndex = scanner.currentIndex
                         isFirst = false
                     }
                 }
@@ -947,19 +932,9 @@ var raw_parser = function (grammar_merged) {
                         }
 
                         if (isSuccess) {
-                            var match
+                            var match = result
 
-                            if (mode === 'token') {
-                                match = {
-                                    start: startIndex,
-                                    end: scanner.currentIndex,
-                                    text: scanner.text(startIndex)
-                                }
-                                match.value = result
-                            }
-                            else {
-                                match = result
-                            }
+                           
 
                             if (result.length == 0 && Lbound == -1) {
                                 isEnd = true
@@ -980,7 +955,6 @@ var raw_parser = function (grammar_merged) {
                         isFirst = true
                         isSuccess = false
                         isEnd = false
-                        startIndex = -1
                         _currentIndex = 0
                         _matchers = []
                         result = []
@@ -994,7 +968,6 @@ var raw_parser = function (grammar_merged) {
                 var isFirst = true
                 var isEnd = false
                 var isSuccess = false
-                var startIndex = -1
 
                 return {
                     next: function () {
@@ -1005,7 +978,7 @@ var raw_parser = function (grammar_merged) {
                         isSuccess = false
 
                         if (isFirst) {
-                            startIndex =  scanner.currentIndex
+                            
                             isFirst = false
                         }
 
@@ -1025,19 +998,11 @@ var raw_parser = function (grammar_merged) {
                             var result = {
                                 option:option_name,
                                 branch: names[_currentIndex],
-                                value: match
+                                value: match,
+                                __type:grammarType.option
                             }
 
-                            if (mode == 'text') {
-                                
-                            }
-                            else if (mode == 'token') {
-
-                                result.start = startIndex
-                                result.end = scanner.currentIndex
-                                result.text = scanner.text(startIndex)
-                                
-                            }
+                            
 
                             return result
                         }
@@ -1053,7 +1018,6 @@ var raw_parser = function (grammar_merged) {
                         
                         isEnd = false
                         isFirst = true
-                        startIndex = -1
                         _currentIndex = 0
                         
 
@@ -1359,5 +1323,65 @@ var basic_ast_rewritor = function (option) {
             return get_option_ast(raw_ast,option)
         }
     }
+}
+
+
+var get_first_token = function (raw_branch_ast, config) {
+    switch (config.type) {
+        case grammarType.option:
+            var branch = config.get_branch(raw_branch_ast.branch)
+            var value = raw_branch_ast.value
+            if (branch.isLeftSelfRec) {
+                return get_first_token(value[0], config)
+            }
+            else {
+                return get_first_token(value, branch.config)
+            }
+            break
+        case grammarType.composite:
+            return get_first_token(raw_branch_ast[0], config.config[0])
+            break
+        case grammarType.token:
+            return raw_branch_ast
+            break
+        default:
+
+    }
+}
+
+var get_last_token = function (raw_branch_ast, config) {
+    switch (config.type) {
+        case grammarType.option:
+            var branch = config.get_branch(raw_branch_ast.branch)
+            var value = raw_branch_ast.value
+            if (branch.isLeftSelfRec) {
+                if (value[1].length > 0) {
+                    return get_last_token(value[1][value[1].length - 1], branch.config.config[branch.config.config-1])
+                }
+                else {
+                    return get_last_token(value[0], config)
+                }
+            }
+            else {
+                return get_last_token(raw_branch_ast.value, branch.config)
+            }
+            break
+        case grammarType.composite:
+            return get_last_token(raw_branch_ast[raw_branch_ast.length - 1],config.config[config.config.length - 1])
+            break
+        case grammarType.token:
+            return raw_branch_ast
+            break
+        default:
+
+    }
+    
+    
+}
+
+var get_range = function (raw_branch_ast, ast, config) {
+    var firstToken = get_first_token(raw_branch_ast,config)
+    ast.__start = firstToken.__start
+    ast.__end = get_last_token(raw_branch_ast, config).__end
 }
 
