@@ -32,7 +32,7 @@
                     //comments
                     /[/][/][^\n](\n)?/
                 ],
-                mode:"text"
+                mode:"token"
             }
         }
 
@@ -43,16 +43,17 @@
         // raw ast
         //var raw_ast = raw_p.parse("1 * 2 +3", "expr")
         // tokens
-        var ast = raw_p.parse("{a:1,b:2}", "expr")
+        var raw_ast = raw_p.parse("{a:1,b:2}", "expr")
+        console.log(raw_ast)
 
         var rewriter = basic_ast_rewritor(g_merged.parser.expr)
-        var re_write_ast = rewriter.rewrite(ast)
+        var re_write_ast = rewriter.rewrite(raw_ast)
         
 
-        console.log(ast)
+        
         console.log(re_write_ast)
-        
-
+        var last_token = get_first_token(raw_ast, g_merged.parser.expr)
+        get_range(raw_ast, re_write_ast,g_merged.parser.expr)
 
     </script>
 </head>
